@@ -1,66 +1,90 @@
 <?php
 /* ====================
-[BEGIN_SED_EXTPLUGIN]
-Code=similar
-Part=page
-File=similar.page
+[BEGIN_COT_EXT]
 Hooks=page.tags
-Tags=similar.tpl:{SIMILAR_ROW_NUMBER},{SIMILAR_ROW_URL},{SIMILAR_ROW_TITLE},{SIMILAR_ROW_AUTHOR},{SIMILAR_ROW_CATEGORY},{SIMILAR_ROW_DATE}
-Order=1
-[END_SED_EXTPLUGIN]
+Tags=similar.tpl:{SIMILAR_ROW_NUMBER},{SIMILAR_ROW_URL},{SIMILAR_ROW_TITLE},{SIMILAR_ROW_AUTHOR},{SIMILAR_ROW_CATEGORY},{SIMILAR_ROW_DATE};page.tpl:{SIMILAR_PAGES}
+[END_COT_EXT]
 ==================== */
+defined('COT_CODE') or die('Wrong URL.');
 
-if (!defined('SED_CODE')) { die('Wrong URL.'); }
+require_once cot_langfile('similar');
 
-$relev = $cfg['plugin']['similar']['relev'];
-$limit = $cfg['plugin']['similar']['max_sim'];
+$limit = Cot::$cfg['plugin']['similar']['max_sim'];
 
 $title = preg_replace('#[^\p{L}0-9\-_ ]#u', ' ', $pag['page_title']);
 
-require_once sed_langfile('similar');
-
-$t1 = new XTemplate(sed_skinfile('similar', true));
+$t1 = new XTemplate(cot_tplfile('similar', 'plug'));
 
 $l3 = $limit * 3;
-$sql_sim = sed_sql_query("SELECT p.page_id, p.page_alias, p.page_title, p.page_ownerid, p.page_cat, p.page_date,
-		p.page_desc, u.user_name
-	FROM $db_pages AS p LEFT JOIN $db_users AS u ON u.user_id=p.page_ownerid
-	WHERE (p.page_state='0' OR p.page_state='2') AND p.page_id != {$pag['page_id']}
-		AND MATCH (page_title) AGAINST ('$title')>$relev LIMIT $l3");
-if (sed_sql_numrows($sql_sim) > 0)
+$sql_sim = Cot::$db->query("SELECT p.*, u.*
+	FROM $db_pages AS p
+		LEFT JOIN $db_users AS u ON u.user_id=p.page_ownerid
+	WHERE (p.page_state='0' OR p.page_state='2') AND p.page_id != ".$pag['page_id']."
+		AND MATCH (page_title) AGAINST ('$title') > ".Cot::$cfg['plugin']['similar']['relev']." LIMIT $l3");
+if ($sql_sim->rowCount() > 0)
 {
-	$samesubcat = array();
-	$samecat = array();
-	$samesite = array();
-	while($row = sed_sql_fetcharray($sql_sim))
+	$samesubcat = $samecat = $samesite = [];
+	foreach ($sql_sim->fetchAll() as $row)
 	{
-		if($row['page_cat'] == $pag['page_cat'])
+		if ($row['page_cat'] == $pag['page_cat'])
+		{
 			$samesubcat[] = $row;
-		elseif(strstr($sed_cat[$pag['page_cat']]['path'], $row['page_cat']))
+		}
+		elseif (mb_strstr(Cot::$structure['page'][$pag['page_cat']]['path'], $row['page_cat']))
+		{
 			$samecat[] = $row;
+		}
 		else
+		{
 			$samesite[] = $row;
+		}
 	}
-	$i=1;
+	$i = 1;
 	$j = 0;
 	$k = 1;
 	while ($i <= $limit)
 	{
-		if($k == 1 && $j >= count($samesubcat)) { $k = 2; $j = 0; }
-		if($k == 2 && $j >= count($samecat)) { $k = 3; $j = 0; }
-		if($k == 3 && $j >= count($samesite)) break;
-		if($k == 1) $row = $samesubcat[$j]; elseif($k == 2) $row = $samecat[$j]; else $row = $samesite[$j];
-		$row['page_pageurl'] = (empty($row['page_alias'])) ? sed_url('page', 'id=' . $row['page_id'])
-			: sed_url('page', 'al=' . $row['page_alias']);
-		$t1->assign(array(
-			'SIMILAR_ROW_NUMBER' => $i,
-			'SIMILAR_ROW_URL' => $row['page_pageurl'],
-			'SIMILAR_ROW_TITLE' => sed_cutstring($row['page_title'], $cfg['plugin']['similar']['cutstr']),
-			'SIMILAR_ROW_AUTHOR' => sed_build_user($row['page_ownerid'], sed_cc($row['user_name'])),
-			'SIMILAR_ROW_CATEGORY' => '<a href="'.sed_url('list', 'c='.$row['page_cat']).'">'.sed_cutstring($sed_cat[$row['page_cat']]['title'], $cfg['plugin']['similar']['cutstr']).'</a>',
-			'SIMILAR_ROW_DATE' => date($cfg['formatyearmonthday'], $row['page_date'] + $usr['timezone'] * 3600),
-			'SIMILAR_ROW_DESC' => htmlspecialchars($row['page_desc'])
-		));
+		if ($k == 1 && $j >= count($samesubcat))
+		{
+			$k = 2;
+			$j = 0;
+		}
+		if ($k == 2 && $j >= count($samecat))
+		{
+			$k = 3;
+			$j = 0;
+		}
+		if ($k == 3 && $j >= count($samesite))
+		{
+			break;
+		}
+		if ($k == 1)
+		{
+			$row = $samesubcat[$j];
+		}
+		elseif($k == 2)
+		{
+			$row = $samecat[$j];
+		}
+		else
+		{
+			$row = $samesite[$j];
+		}
+		$row['page_pageurl'] = (empty($row['page_alias'])) ? cot_url('page', ['c' => $row['page_cat'], 'id' => $row['page_id']]) : cot_url('page', ['c' => $row['page_cat'], 'al' => $row['page_alias']]);
+		$t1->assign('SIMILAR_ROW_NUMBER', $i);
+		$t1->assign(
+			cot_generate_pagetags(
+				$row,
+				'SIMILAR_ROW_',
+				0,
+				Cot::$usr['isadmin'],
+				Cot::$cfg['homebreadcrumb'],
+				'',
+				$row['page_pageurl']
+			)
+		);
+		$t1->assign('SIMILAR_ROW_OWNER', cot_build_user($row['page_ownerid'], $row['user_name']));
+		$t1->assign(cot_generate_usertags($row, 'SIMILAR_ROW_OWNER_'));
 		$i++;
 		$j++;
 		$t1->parse('MAIN.SIMILAR_ROW');
@@ -75,5 +99,3 @@ else
 }
 
 $t->assign('SIMILAR_PAGES', $plugin_out);
-
-?>
